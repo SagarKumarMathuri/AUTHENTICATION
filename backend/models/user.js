@@ -18,8 +18,8 @@ const schema = new mongoose.Schema({
     type: String,
     default: "user",
   },
-}
+},
 {timestamps: true}
 );
 
-export const User = mongoose.model("User", schema)
+export const User = mongoose.model("User", schema);
