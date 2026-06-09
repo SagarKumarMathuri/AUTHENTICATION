@@ -6,8 +6,8 @@ import { User } from "../models/User.js";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import sendMail from "../config/sendMail.js";
-import { getVerifyEmailHtml } from "../config/html.js";
-import { email } from "zod";
+import { getOtpHtml, getVerifyEmailHtml } from "../config/html.js";
+import { generateToken } from "../config/generateToken.js";
 
 export const registerUser = TryCatch(async (req, res) => {
   const sanitezedBody = sanitize(req.body);
@@ -153,10 +153,86 @@ export const loginUser = TryCatch(async (req, res) => {
 
   const rateLimitKey = `login-rate-limit:${req.ip}:${email}`;
 
-   if (await redisClient.get(ratelimitKey)) {
+  if (await redisClient.get(rateLimitKey)) {
     return res.status(429).json({
       message: "Too many requests, try again later",
     });
   }
-  
+
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    return res.status(400).json({
+      message: "Invalid credentials",
+    });
+  }
+
+  const comparePassword = await bcrypt.compare(password, user.password);
+
+  if (!comparePassword) {
+    return res.status(400).json({
+      message: "Invalid credentials",
+    });
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  const otpKey = `otp:${email}`;
+ 
+  await redisClient.set(otpKey, JSON.stringify(otp), {
+    EX: 300,
+  })
+
+  const subject = "otp for verification";
+
+  const html = getOtpHtml({email, otp});
+
+  await sendMail ({email, subject, html});
+
+  await redisClient.set(rateLimitKey, "true", {
+    EX: 60,
+  })
+
+  res.status({
+    message:"If your email is valid, an otp has been sent. it will be valid for 5 min.",
+  })
 });
+
+export const verifyOtp = TryCatch(async (req, res) => {
+  const {email, otp} = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({
+      message: "Please provide all details"
+    });
+  }
+ const otpKey = `otp:${email}`;
+
+ const storedOtpString = await redisClient.get(otpKey);
+
+ if (!storedOtpString) {
+  return res.status(400).json({
+    message:"otp expired",
+  });
+ }
+
+ const storedOtp = JSON.parse(storedOtpString)
+
+ if (storedOtp !== otp) {
+  return res.status(400).json({
+    message: "Invalid Otp",
+  });
+ }
+
+ await redisClient.del(otpKey);
+
+ let user = await User.findOne({ email});
+
+ const tokenData = await generateToken(user._id, res);
+
+ res.status(200).json({
+  message: `welcome ${user.name}`,
+  user,
+ })
+})
+ 
