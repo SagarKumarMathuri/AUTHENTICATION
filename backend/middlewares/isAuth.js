@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { redisClient } from "../index.js";
 import { User } from "../models/User.js";
+import { RedisClient } from "redis";
 
 export const isAuth = async(req, res, next) => {
   try {
@@ -32,7 +33,14 @@ export const isAuth = async(req, res, next) => {
         message: "no user with this id",
       });
     }
+
+    await redisClient.setEx(`user:${user._id}`, 3600, JSON.stringify(user));
+
+    req.user = user;
+    next();
   } catch (error){
-   
+   res.status(500).json({
+    message:error.message,
+   })
   }
 }
